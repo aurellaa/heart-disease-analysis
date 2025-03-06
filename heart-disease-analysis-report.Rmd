@@ -1,0 +1,379 @@
+---
+title: "Heart Disease Analysis"
+author: "aurellaa"
+date: "2025-03-05"
+output: 
+  pdf_document:
+    latex_engine: xelatex
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r reproducibility, echo=FALSE}
+rm(list = ls())  # clear environment
+set.seed(123)     # ensure reproducibility
+
+```
+
+## 1. Introduction
+
+The Heart Disease UCI dataset contains medical records of patients with various risk factors for heart disease. This dataset is commonly used for predictive modeling and medical research. It includes features such as age, sex, chest pain type, cholesterol levels, blood pressure, and more.
+
+This report aims to identify significant predictors of heart disease and assess how well a logistic regression model can classify patients as healthy or unhealthy based on their characteristics.
+
+This project was made alongside Josh Starmer's StatQuest video: "Logistic Regression, Clearly Explained!!!!".
+
+## 2. Data Inspection and Overview
+
+### 2.1 Loading Required Libraries
+
+Below is a list of the packages used in this report:
+
+```{r load-packages, echo = TRUE, message = FALSE, warning = FALSE}
+library(dplyr)
+library(ggplot2)
+library(cowplot)
+```
+
+### 2.2 Inspecting the Dataset
+
+```{r load-data, echo = TRUE}
+# Loading the dataset
+heart_data <- read.csv("heart_disease_uci.csv")
+
+# First looks at the data
+head(heart_data)
+str(heart_data)
+```
+
+Inspecting the dataset reveals that there are 920 observations for 16 variables:
+
+-   "id", which gives a unique ID for each patient.
+
+-   "age", the age of the patient in years.
+
+-   "sex", consisting of male and female.
+
+-   "dataset", which shows the location in which the data was taken. In this case, the data was collected from the city Cleveland.
+
+-   "cp", which stands for "chest pain". This variable consists of four categories:
+
+    -   1: Typical angina
+
+    -   2: Atypical angina
+
+    -   3: Non-anginal pain
+
+    -   4: Asymptomatic
+
+-   "trestbps", which is the resting blood pressure in mmHg.
+
+-   "chol", which is serum cholesterol in mg/dL.
+
+-   "fbs", which stands for fasting blood sugar. This variable is a binary one, where 1 indicates the value is more than 120mg/dL, and 0 indicates that the value is less than or equal to 120mg/dL.
+
+-   "restecg", which is the resting ECG. There are 3 categories:
+
+    -   0: Normal
+
+    -   1: ST-T wave abnormality
+
+    -   2: Left ventricular hypertrophy
+
+-   "exang", which stands for "Exercise Induced Angina". 1 is true, and 0 is false.
+
+-   "oldpeak", which is the ST depression induced by exercise.
+
+-   "ca" which is the number of major vessels (0 to 3) that are visible during fluoroscopy. 0 indicates no visible narrowing, while 3 indicates severe blockage.
+
+-   "thal", short for thalassemia (a genetic blood disorder affecting hemoglobin production). There are three categories:
+
+    -   1: Normal
+
+    -   2: Fixed defect
+
+    -   3: Reversible defect
+
+-   "num", which specifies to diagnosis of heart disease. Values range from 0-4, depending on severity of disease (where 0 is healthy, and 1-4 is unhealthy).
+
+### 2.3 Recoding the Variables 
+
+Some of the variables may be recoded in order to better suit the aim of this analysis.
+
+The "num" variable is renamed to "heart_disease" for better clarity. This variable originally took values 0-4 indicating presence and severity of heart disease. For the purpose of conducting logistic regression, it has been converted into a binary variable where 0 indicates absence of heart disease and 1 indicates presence of heart disease.
+
+Additionally, since logistic regression requires categorical variables to be treated as factors, relevant columns like sex, cp, and restecg have been converted to factors for proper analysis.
+
+```{r recode, echo = TRUE, message = FALSE}
+heart_data <- heart_data |>
+  mutate(sex = as.factor(sex),
+         dataset = as.factor(dataset),
+         cp = as.factor(cp),
+         restecg = as.factor(restecg),
+         slope = as.factor(slope),
+         thal = as.factor(thal),
+         ca = as.factor(ca)) |>
+  mutate(num = ifelse(num > 0, 1, 0)) |>
+  rename(heart_disease = num) 
+
+```
+
+```{r recode2, echo = TRUE}
+# converting the heart disease column such that 0 is "healthy" and 1 is "unhealthy"
+
+heart_data$heart_disease <- ifelse(test= heart_data$heart_disease == 0, 
+                                   yes = "Healthy", no = "Unhealthy")
+heart_data$heart_disease <- as.factor(heart_data$heart_disease)
+
+```
+
+The following displays the dataset with the newly added changes:
+
+```{r newdataset, echo = TRUE}
+str(heart_data)
+head(heart_data)
+```
+
+### 2.4 Checking for Imbalance of Data
+
+Before fitting a logistic regression model, it is important to check whether the data is imbalanced. A highly imbalanced dataset—where one class (e.g., "Healthy") dominates the other ("Unhealthy")—can lead to biased predictions. If the model sees too few cases of a particular condition, it may not learn to predict that outcome well.
+
+To check for imbalance, we use cross-tabulations (xtabs) to see the distribution of key categorical variables across the two heart disease categories.
+
+```{r xtabs, echo = TRUE}
+# do healthy and diseased samples come from each gender?
+xtabs(~ heart_disease + sex, data = heart_data)
+
+# were all 4 levels of chest pain reported by many patients?
+xtabs(~ heart_disease + cp, data = heart_data)
+
+# were both high and low fasting blood sugar reported by many patients?
+xtabs(~ heart_disease + fbs, data = heart_data)
+
+# were all levels of restecg reported by many patients?
+xtabs(~ heart_disease + restecg, data = heart_data)
+
+```
+
+From initial checks, it appears that ST-T wave abnormality has only 5 patients reported (2 healthy, 3 unhealthy). This small sample size might reduce the reliability of this variable as a predictor.
+
+### 2.5 Handling Missing Values
+
+```{r missing1, echo = TRUE}
+# check for missing values
+colSums(is.na(heart_data))
+```
+
+It should be noted that omission of missing values may impose bias on the results of the statistical analyses.
+
+```{r missing2, echo = TRUE}
+# removing the missing values
+heart_data <- na.omit(heart_data)
+```
+
+```{r summarystats, echo = TRUE}
+# summary statistics
+summary(heart_data)
+```
+
+## 3. Explanatory data analysis 
+
+```{r globaltheme, echo = FALSE}
+theme_set(
+  theme_classic()
+)
+```
+
+### 3.1 Age Distribution of Healthy and Unhealthy Patients
+
+```{r dist1, echo = TRUE}
+# age distribution
+ggplot(heart_data, aes(x = age)) +
+  geom_histogram(binwidth = 5, alpha = 0.8) +
+  facet_grid(rows = vars(heart_disease)) +
+  labs(title = "Age Distribution of Patients", x = "Age", y = "Count")
+```
+
+The majority of patients with heart disease are concentrated within the 55–65 age range, suggesting an increased likelihood of heart disease among older individuals. However, it is important to note that both healthy and unhealthy patients are predominantly within the 50–60 age range. Given the similar age distribution in both groups, age alone may have limited predictive power in distinguishing heart disease cases.
+
+### 3.2 Proportion of Heart Disease by Sex
+
+```{r dist2, echo=T}
+# visualizing the data (heart disease proportion by sex)
+ggplot(heart_data, aes(x = as.factor(sex), fill = as.factor(heart_disease))) +
+  geom_bar(position = "fill", color = "black") +
+  labs(x = "Sex", y = "Proportion", title = "Proportion of Heart Disease by Sex",
+       fill = "Heart Disease") 
+
+```
+
+Males seem to have a significantly higher proportion of heart disease cases than females. This suggests that males may have higher heart disease risk compared to females.
+
+### 3.3 Proportion of Heart Disease by Chest Pain Type
+
+```{r dist3, echo=T}
+
+# visualizing the data (heart disease proportion by chest pain type)
+ggplot(heart_data, aes(x = cp, fill = heart_disease)) +
+  geom_bar(position = "fill", color = "black") +
+  labs(title = "Proportion of Heart Disease by Chest Pain Type",
+       x = "Chest Pain Type", y = "Proportion", fill = "Heart Disease")
+
+```
+
+Patients who experienced asymptomatic chest pain have the highest proportion of unhealthy cases, suggesting that the absence of typical chest pain symptoms does not indicate a lower risk of heart disease.
+
+### 3.4 Cholesterol Levels by Heart Disease Status
+
+```{r dist4, echo=T}
+
+# visualizing the data (heart disease proportion by cholesterol)
+ggplot(heart_data, aes(x = heart_disease, y = chol, fill = heart_disease)) +
+  geom_boxplot(alpha = 0.7) +
+  labs(title = "Cholesterol Levels by Heart Disease Status",
+       x = "Heart Disease", y = "Cholesterol (mg/dL)")
+
+```
+
+Both groups of patients show a wide range of cholesterol levels.
+
+The median cholesterol level seems slightly higher in the unhealthy group compared to the healthy group.
+
+Both groups have outliers with cholesterol levels higher than 400 mg/dL, but there are more outliers in the healthy group, with some very extreme cholesterol values. Interestingly, there is one outlier with a cholesterol level of nearly 0 mg/dL in the healthy group.
+
+### 3.5 Resting Blood Pressure by Heart Disease Status
+
+```{r dist5, echo=T}
+
+# visualizing the data (heart disease proportion by trestbps)
+ggplot(heart_data, aes(x = heart_disease, y = trestbps, fill = heart_disease)) +
+  geom_boxplot(alpha = 0.7) +
+  labs(title = "Resting Blood Pressure by Heart Disease Status",
+       x = "Heart Disease", y = "Blood Pressure (mmHg)")
+
+
+```
+
+The median resting blood pressure is slightly higher in the unhealthy group than in the healthy group. This suggests that people with heart disease tend to have higher resting blood pressure.
+
+Outliers are present in both groups, however the unhealthy group has more extreme outliers, possibly indicating more individuals with dangerously high blood pressures.
+
+### 3.6 Proportion of Heart Disease by Exercise-Induced Angina
+
+```{r dist6, echo=T}
+# visualizing the data (heart disease proportion by exang)
+ggplot(heart_data, aes(x = exang, fill = heart_disease)) +
+  geom_bar(position = "fill", color = "black") +
+  labs(title = "Proportion of Heart Disease by Exercise-Induced Angina",
+       x = "Exercise-Induced Angina", y = "Proportion", fill = "Heart Disease")
+```
+
+There is a larger proportion of unhealthy patients in those that have exercise-induced angina, suggesting that the presence of exercise-induced angina increases the likelihood of having heart disease.
+
+## 4. Simple Logistic Regression
+
+In this section, a logistic regression model is fit to predict heart disease status (heart_disease) using a single predictor: sex.
+
+The logistic regression model is fit using the glm() function:
+
+```{r log1, echo = TRUE}
+logistic1 <- glm(heart_disease ~ sex, data = heart_data, family = "binomial")
+
+```
+
+Examining the results:
+
+```{r log2,echo=T}
+summary(residuals(logistic1, type = "deviance")) 
+summary(logistic1)
+```
+
+Interpretations:
+
+-   The deviance residuals appear roughly symmetrical and centered around 0, indicating that the model is fitting the data reasonably well.
+
+-   The coefficients correspond to the following model:
+
+heart disease = -1.0578 + 1.2919 x the patient is male
+
+-   1.2919 is the log(odds ratio) of the odds that a male will have heart disease over the odds that a female will. In other words, the odds of heart disease in males are 𝑒^1.2919^ ≈ 3.64 times higher than in females.
+
+-   The p-values are \< 0.05, and therefore the log(odds) and log(odds ratios) are both statistically significant.
+
+-   The number of Fisher Scoring iterations tell us how quickly the glm() function converged on the maximum likelihood estimates for the coefficients. If the model takes too many iterations, it may indicate convergence issues, but here, the model converged efficiently.
+
+From this simple logistic regression, it can be concluded that males have significantly higher odds of developing heart disease compared to females. However, since heart disease is influenced by multiple factors, this analysis will be extended by including additional predictors in a multiple logistic regression model.
+
+## 5. Multiple Logistic Regression
+
+### 5.1 Fitting the Logistic Regression Model
+
+```{r log3, echo=T}
+logistic2 <- glm(heart_disease ~ ., data = heart_data, family = "binomial")
+summary(logistic2)
+  
+```
+
+```{r baseline, echo=T}
+contrasts(heart_data$cp)
+```
+
+Interpretations:
+
+-   Sex (Male) (p = 0.0015, coef = 1.775)
+
+    -   p = 0.0015 is \< 0.05 , meaning that sex is a useful predictor of heart disease
+
+    -   The coefficients correspond to the following model:
+
+$$ \log\left(\frac{1 - P(\text{heart disease})}{P(\text{heart disease})}\right) = -33.96 + 1.775 \times (\text{Male}) $$
+
+-   In other words, when the patient is a female, the log(odds of heart disease) are -33.96.
+
+-   And when the patient is a male, the log(odds of heart disease) are -32.185.
+
+-   Males have higher odds of heart disease compared to females.
+
+-   Resting blood pressure (p = 0.02, coef = 0.0277) is a significant predictor of heart disease, where higher blood pressure slightly increases the risk for having heart disease.
+
+-   The number of major vessels (ranging from 0 to 3) visible during fluoroscopy, which indicate blockages, is a strong predictor of heart disease. An increase in the number of visible vessels (1, 2, or 3) is associated with higher odds of having heart disease.
+
+-   Some types of chest pain are also significant predictors of heart disease. Having non-anginal pain (p = 0.00015, coef = -1.977) and typical angina (p = 0.00059, coef = -2.510) decreases the odds for heart disease compared to asymptomatic chest pain.
+
+-   Having atypical angina, however, doesn't seem to be a strong predictor of heart disease in this dataset.
+
+-   Odds ratio = exp(1.775) ≈ 5.9, meaning the odds of heart disease for males are 5.9 times the odds for females.
+
+-   Surprisingly, age is not a significant predictor, with a p-value of 0.338. However, most patients in the dataset (both healthy and unhealthy), were mostly 50-60 year olds, which explains why age might have lost its predictive power
+
+-   Cholesterol is not a significant predictor with a p-value of 0.233. Cholesterol alone may not strongly predict heart disease.
+
+-   Fasting blood sugar also doesn't significantly predict heart disease, with a p-value of 0.383.
+
+-   Resting ECG has no significant impact on heart disease, with a p-value of 0.195-0.926
+
+-   Exercise-induced angina is also not a useful predictor with a p-value of 0.128.
+
+### 5.2 Visualising the Logistic Regression Model
+
+```{r log4,echo=T}
+predicted.data <- data.frame(
+  probability.of.hd = logistic2$fitted.values,
+  heart_disease = heart_data$heart_disease
+)
+
+predicted.data <- predicted.data[
+  order(predicted.data$probability.of.hd, decreasing = F),]
+
+predicted.data$rank <- 1:nrow(predicted.data)
+
+ggplot(data = predicted.data, aes(x = rank, y = probability.of.hd)) + 
+  geom_point(aes(color = heart_disease), alpha = 1, shape = 4, stroke = 2) +
+  xlab("index") +
+  ylab("predicted probability of getting heart disease")
+```
+
+We can see that the model correctly assigned high probabilities to unhealthy individuals and low probabilities to healthy ones. Additionally, the separation between the two groups is fairly strong, meaning the model is capturing useful patterns.
